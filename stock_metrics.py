@@ -201,12 +201,16 @@ def get_options_sentiment(symbol: str) -> dict:
 
 def get_fundamentals(symbol: str) -> dict:
     """
-    Three-tier fetch — each tier is independent; failures are silenced.
+    Multi-tier fetch — each tier is independent; failures are logged + silenced.
 
-    Tier 0  yf.download(period="1y")  — same call that powers Technicals,
-            confirmed working everywhere.  Gives price, 52w H/L from raw OHLC.
-    Tier 1  fast_info                  — market cap, currency (needs curl_cffi).
-    Tier 2  .info                      — sector, P/E, analyst ratings, etc.
+    Tier 0   yf.download(period="1y")  — OHLC. Always works. Gives price,
+             52w H/L, and computes beta vs SPY from daily returns.
+    Tier 1   fast_info                  — market cap, currency (curl_cffi).
+             yfinance 1.x renamed attrs: year_high/year_low (not fifty_two_week_*).
+    Tier 2   .info                      — sector, P/E, analyst ratings, etc.
+             Often blocked on cloud IPs; errors are printed to logs.
+    Tier 3   yf.Search()               — lightweight search API fallback for
+             sector/industry/name when Tier 2 fails on cloud.
     """
     result = {
         "symbol": symbol, "name": symbol,
@@ -233,23 +237,39 @@ def get_fundamentals(symbol: str) -> dict:
                 result["52w_high"] = _safe_float(df1y["High"].max())
             if "Low" in df1y.columns:
                 result["52w_low"] = _safe_float(df1y["Low"].min())
+            # Beta: computed from 1y daily returns vs SPY — no extra API needed
+            try:
+                spy1y = _download("SPY", period="1y")
+                if not spy1y.empty:
+                    s_ret = df1y["Close"].astype(float).pct_change().dropna()
+                    m_ret = spy1y["Close"].astype(float).pct_change().dropna()
+                    both  = pd.concat([s_ret, m_ret], axis=1).dropna()
+                    if len(both) > 20:
+                        cov_val = float(both.iloc[:, 0].cov(both.iloc[:, 1]))
+                        var_val = float(both.iloc[:, 1].var())
+                        if var_val > 0:
+                            result["beta"] = round(cov_val / var_val, 2)
+            except Exception:
+                pass
     except Exception:
         pass
 
     # ── Tier 1: fast_info (needs curl_cffi; skip silently if unavailable) ────
     try:
         fi = yf.Ticker(symbol).fast_info
-        result["market_cap"] = _safe_float(getattr(fi, "market_cap",          None))
+        result["market_cap"] = _safe_float(getattr(fi, "market_cap", None))
         result["currency"]   = getattr(fi, "currency", "USD") or "USD"
-        # Override price/52w from fast_info only if tier-0 missed them
         if result["current_price"] is None:
             result["current_price"] = _safe_float(getattr(fi, "last_price", None))
+        # yfinance 1.x renamed these; try both attribute names
         if result["52w_high"] is None:
-            result["52w_high"] = _safe_float(getattr(fi, "fifty_two_week_high", None))
+            result["52w_high"] = _safe_float(
+                getattr(fi, "year_high", None) or getattr(fi, "fifty_two_week_high", None))
         if result["52w_low"] is None:
-            result["52w_low"] = _safe_float(getattr(fi, "fifty_two_week_low", None))
-    except Exception:
-        pass
+            result["52w_low"] = _safe_float(
+                getattr(fi, "year_low", None) or getattr(fi, "fifty_two_week_low", None))
+    except Exception as e:
+        print(f"[TickerIQ] fast_info {symbol}: {type(e).__name__}: {e}")
 
     # ── Tier 2: .info — rich fundamentals (needs curl_cffi on cloud) ─────────
     try:
@@ -279,11 +299,25 @@ def get_fundamentals(symbol: str) -> dict:
             result["target_low_price"]     = sf("targetLowPrice")
             result["52w_high"]             = result["52w_high"] or sf("fiftyTwoWeekHigh")
             result["52w_low"]              = result["52w_low"]  or sf("fiftyTwoWeekLow")
-            result["beta"]                 = sf("beta")
+            result["beta"]                 = sf("beta") or result["beta"]
             result["free_cashflow"]        = info.get("freeCashflow")
             result["total_revenue"]        = info.get("totalRevenue")
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[TickerIQ] .info {symbol}: {type(e).__name__}: {e}")
+
+    # ── Tier 3: yf.Search — lightweight fallback for sector/name on cloud ────
+    if result["sector"] == "Unknown":
+        try:
+            search = yf.Search(symbol, max_results=1)
+            quotes = getattr(search, "quotes", None) or []
+            if quotes:
+                q = quotes[0]
+                if result["name"] == symbol:
+                    result["name"] = q.get("longname") or q.get("shortname") or symbol
+                result["sector"]   = q.get("sector")   or "Unknown"
+                result["industry"] = q.get("industry") or "Unknown"
+        except Exception as e:
+            print(f"[TickerIQ] Search {symbol}: {type(e).__name__}: {e}")
 
     return result
 
