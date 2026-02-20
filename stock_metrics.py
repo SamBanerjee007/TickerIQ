@@ -10,11 +10,28 @@ import datetime
 import numpy as np
 import pandas as pd
 import pandas_ta as ta
+import requests
 import yfinance as yf
 
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 warnings.filterwarnings("ignore", category=FutureWarning)
 warnings.filterwarnings("ignore", message=".*utcnow.*")   # yfinance uses deprecated Timestamp.utcnow
+
+# ── Shared HTTP session ────────────────────────────────────────────────────────
+# Cloud platforms (Streamlit, AWS) are often rate-limited by Yahoo Finance.
+# Passing a session with a real browser User-Agent bypasses this reliably.
+
+_SESSION = requests.Session()
+_SESSION.headers.update({
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/120.0.0.0 Safari/537.36"
+    ),
+    "Accept":          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.5",
+    "Accept-Encoding": "gzip, deflate, br",
+})
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -52,7 +69,7 @@ def _safe_float(value, decimals=2):
 
 def _download(symbol: str, period: str, interval: str = "1d") -> pd.DataFrame:
     df = yf.download(symbol, period=period, interval=interval,
-                     progress=False, auto_adjust=True)
+                     progress=False, auto_adjust=True, session=_SESSION)
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.get_level_values(0)
     return df
@@ -155,7 +172,7 @@ def get_technical_indicators(symbol: str, period: str = "6mo") -> dict:
 
 def get_options_sentiment(symbol: str) -> dict:
     try:
-        stock = yf.Ticker(symbol)
+        stock = yf.Ticker(symbol, session=_SESSION)
         if not stock.options:
             return {"pc_ratio": None, "sentiment": "N/A", "calls_oi": 0, "puts_oi": 0}
 
@@ -199,7 +216,7 @@ def get_options_sentiment(symbol: str) -> dict:
 
 def get_fundamentals(symbol: str) -> dict:
     try:
-        info = yf.Ticker(symbol).info
+        info = yf.Ticker(symbol, session=_SESSION).info
 
         def sf(key, dec=2):
             return _safe_float(info.get(key), dec)
