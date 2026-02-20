@@ -173,7 +173,8 @@ def get_options_sentiment(symbol: str) -> dict:
                 chain     = stock.option_chain(d)
                 calls_oi += int(chain.calls["openInterest"].sum())
                 puts_oi  += int(chain.puts["openInterest"].sum())
-            except Exception:
+            except Exception as e:
+                print(f"[TickerIQ] option_chain {symbol} {d}: {type(e).__name__}: {e}")
                 continue
 
         pc_ratio = round(puts_oi / calls_oi, 2) if calls_oi > 0 else None
@@ -193,7 +194,8 @@ def get_options_sentiment(symbol: str) -> dict:
             "calls_oi":  calls_oi,
             "puts_oi":   puts_oi,
         }
-    except Exception:
+    except Exception as e:
+        print(f"[TickerIQ] options {symbol}: {type(e).__name__}: {e}")
         return {"pc_ratio": None, "sentiment": "N/A", "calls_oi": 0, "puts_oi": 0}
 
 
