@@ -329,7 +329,7 @@ def _render_result(result: dict) -> None:
     top_col1, top_col2, top_col3 = st.columns([1, 1.8, 1.8])
 
     with top_col1:
-        st.plotly_chart(_gauge(score, signal, color), use_container_width=True)
+        st.plotly_chart(_gauge(score, signal, color), width="stretch")
 
     with top_col2:
         st.markdown("#### Market Snapshot")
@@ -459,7 +459,7 @@ def _render_result(result: dict) -> None:
 
     with tab5:
         st.plotly_chart(_component_chart(scored["component_scores"]),
-                        use_container_width=True)
+                        width="stretch")
         st.caption("Bar length = score (1–5). % label = weight in final score.")
 
     st.markdown('<hr class="divider">', unsafe_allow_html=True)
@@ -621,7 +621,7 @@ def show_admin_page():
                          color_discrete_sequence=["#00D4AA"])
             fig.update_layout(paper_bgcolor="#0E1117", plot_bgcolor="#0E1117",
                               font={"color": "#FAFAFA"}, margin=dict(l=0, r=0, t=0, b=0))
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
 
     with ch2:
         st.subheader("Signal Distribution")
@@ -631,7 +631,7 @@ def show_admin_page():
                          color_discrete_sequence=px.colors.sequential.Teal)
             fig.update_layout(paper_bgcolor="#0E1117", font={"color": "#FAFAFA"},
                               margin=dict(l=0, r=0, t=0, b=0))
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
 
     ch3, ch4 = st.columns(2)
 
@@ -644,7 +644,7 @@ def show_admin_page():
             fig.update_layout(yaxis={"autorange": "reversed"},
                               paper_bgcolor="#0E1117", plot_bgcolor="#0E1117",
                               font={"color": "#FAFAFA"}, margin=dict(l=0, r=0, t=0, b=0))
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
 
     with ch4:
         st.subheader("Queries by Trading Style")
@@ -654,7 +654,7 @@ def show_admin_page():
                          color_discrete_sequence=px.colors.sequential.Teal_r)
             fig.update_layout(paper_bgcolor="#0E1117", font={"color": "#FAFAFA"},
                               margin=dict(l=0, r=0, t=0, b=0))
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width="stretch")
 
     # ── Raw data ──────────────────────────────────────────────────────────────
     st.divider()
@@ -665,7 +665,7 @@ def show_admin_page():
                 raw[["created_at", "symbol", "trading_style", "score", "signal"]]
                   .sort_values("created_at", ascending=False)
                   .reset_index(drop=True),
-                use_container_width=True,
+                width="stretch",
             )
 
     if st.button("Logout"):
