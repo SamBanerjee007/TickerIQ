@@ -28,8 +28,15 @@ _SESSION.headers.update({
         "AppleWebKit/537.36 (KHTML, like Gecko) "
         "Chrome/120.0.0.0 Safari/537.36"
     ),
+    "Accept":          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.5",
 })
+# Prime the session with real Yahoo Finance cookies once at startup.
+# This is required on cloud platforms where .info is otherwise blocked.
+try:
+    _SESSION.get("https://finance.yahoo.com", timeout=8)
+except Exception:
+    pass
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -213,42 +220,77 @@ def get_options_sentiment(symbol: str) -> dict:
 # ── Fundamentals ──────────────────────────────────────────────────────────────
 
 def get_fundamentals(symbol: str) -> dict:
+    """
+    Two-tier fetch:
+      1. fast_info  — uses the same v8 chart endpoint as yf.download(), very
+                      reliable on cloud.  Covers price, mkt cap, 52w H/L.
+      2. .info      — richer data (sector, P/E, analyst ratings…) but can be
+                      blocked on cloud IPs.  Enriches the result when available;
+                      silently skipped when not.
+    """
+    result = {
+        "symbol": symbol, "name": symbol,
+        "sector": "Unknown", "industry": "Unknown",
+        "market_cap": None, "currency": "USD", "current_price": None,
+        "pe_trailing": None, "pe_forward": None, "pb_ratio": None,
+        "peg_ratio": None, "debt_to_equity": None,
+        "eps_growth_qoq": None, "revenue_growth_yoy": None,
+        "dividend_yield": None, "short_float": None,
+        "analyst_rating": "N/A", "num_analyst_opinions": None,
+        "target_mean_price": None, "target_high_price": None,
+        "target_low_price": None,
+        "52w_high": None, "52w_low": None, "beta": None,
+        "free_cashflow": None, "total_revenue": None,
+    }
+
+    ticker = yf.Ticker(symbol, session=_SESSION)
+
+    # Tier 1 — fast_info (same endpoint as download, always works)
     try:
-        info = yf.Ticker(symbol, session=_SESSION).info
-
-        def sf(key, dec=2):
-            return _safe_float(info.get(key), dec)
-
-        return {
-            "symbol":              symbol,
-            "name":                info.get("longName", symbol),
-            "sector":              info.get("sector", "Unknown"),
-            "industry":            info.get("industry", "Unknown"),
-            "market_cap":          info.get("marketCap"),
-            "currency":            info.get("currency", "USD"),
-            "current_price":       sf("currentPrice") or sf("regularMarketPrice"),
-            "pe_trailing":         sf("trailingPE"),
-            "pe_forward":          sf("forwardPE"),
-            "pb_ratio":            sf("priceToBook"),
-            "peg_ratio":           sf("pegRatio"),
-            "debt_to_equity":      sf("debtToEquity"),
-            "eps_growth_qoq":      sf("earningsQuarterlyGrowth", 4),
-            "revenue_growth_yoy":  sf("revenueGrowth", 4),
-            "dividend_yield":      sf("dividendYield", 4),
-            "short_float":         sf("shortPercentOfFloat", 4),
-            "analyst_rating":      info.get("recommendationKey", "N/A"),
-            "num_analyst_opinions": info.get("numberOfAnalystOpinions"),
-            "target_mean_price":   sf("targetMeanPrice"),
-            "target_high_price":   sf("targetHighPrice"),
-            "target_low_price":    sf("targetLowPrice"),
-            "52w_high":            sf("fiftyTwoWeekHigh"),
-            "52w_low":             sf("fiftyTwoWeekLow"),
-            "beta":                sf("beta"),
-            "free_cashflow":       info.get("freeCashflow"),
-            "total_revenue":       info.get("totalRevenue"),
-        }
+        fi = ticker.fast_info
+        result["current_price"] = _safe_float(getattr(fi, "last_price",           None))
+        result["market_cap"]    = _safe_float(getattr(fi, "market_cap",           None))
+        result["52w_high"]      = _safe_float(getattr(fi, "fifty_two_week_high",  None))
+        result["52w_low"]       = _safe_float(getattr(fi, "fifty_two_week_low",   None))
+        result["currency"]      = getattr(fi, "currency", "USD") or "USD"
     except Exception:
-        return {"sector": "Unknown", "name": symbol}
+        pass
+
+    # Tier 2 — .info (richer, but can be blocked on cloud; fail gracefully)
+    try:
+        info = ticker.info
+        if info and len(info) > 5:
+            def sf(key, dec=2):
+                return _safe_float(info.get(key), dec)
+            result["name"]                 = info.get("longName", symbol)
+            result["sector"]               = info.get("sector", "Unknown")
+            result["industry"]             = info.get("industry", "Unknown")
+            result["market_cap"]           = result["market_cap"] or info.get("marketCap")
+            result["currency"]             = info.get("currency", result["currency"])
+            result["current_price"]        = result["current_price"] or sf("currentPrice") or sf("regularMarketPrice")
+            result["pe_trailing"]          = sf("trailingPE")
+            result["pe_forward"]           = sf("forwardPE")
+            result["pb_ratio"]             = sf("priceToBook")
+            result["peg_ratio"]            = sf("pegRatio")
+            result["debt_to_equity"]       = sf("debtToEquity")
+            result["eps_growth_qoq"]       = sf("earningsQuarterlyGrowth", 4)
+            result["revenue_growth_yoy"]   = sf("revenueGrowth", 4)
+            result["dividend_yield"]       = sf("dividendYield", 4)
+            result["short_float"]          = sf("shortPercentOfFloat", 4)
+            result["analyst_rating"]       = info.get("recommendationKey", "N/A")
+            result["num_analyst_opinions"] = info.get("numberOfAnalystOpinions")
+            result["target_mean_price"]    = sf("targetMeanPrice")
+            result["target_high_price"]    = sf("targetHighPrice")
+            result["target_low_price"]     = sf("targetLowPrice")
+            result["52w_high"]             = result["52w_high"] or sf("fiftyTwoWeekHigh")
+            result["52w_low"]              = result["52w_low"]  or sf("fiftyTwoWeekLow")
+            result["beta"]                 = sf("beta")
+            result["free_cashflow"]        = info.get("freeCashflow")
+            result["total_revenue"]        = info.get("totalRevenue")
+    except Exception:
+        pass
+
+    return result
 
 
 # ── Master function ───────────────────────────────────────────────────────────
