@@ -572,7 +572,14 @@ def show_analysis_page():
         _render_result(r)
 
     # ── Footer ────────────────────────────────────────────────────────────────
-    st.caption("Data via Yahoo Finance · Not financial advice")
+    st.caption(
+        "Data sourced from Yahoo Finance. All scores and signals are generated algorithmically "
+        "and are for informational purposes only. Nothing on this site constitutes financial, "
+        "investment, or trading advice. Always do your own research before making any investment "
+        "decisions. Past performance is not indicative of future results. "
+        "Yahoo Finance may apply rate limits or throttle requests from shared cloud infrastructure — "
+        "if any fields show N/A, please wait a moment and try again."
+    )
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
