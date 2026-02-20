@@ -158,14 +158,16 @@ def get_technical_indicators(symbol: str, period: str = "6mo") -> dict:
 def get_options_sentiment(symbol: str) -> dict:
     try:
         stock = yf.Ticker(symbol)
-        if not stock.options:
+        expiries = stock.options  # tuple of expiry date strings; empty if blocked
+        print(f"[TickerIQ] options {symbol}: expiries={expiries!r}")
+        if not expiries:
             return {"pc_ratio": None, "sentiment": "N/A", "calls_oi": 0, "puts_oi": 0}
 
         today   = datetime.date.today()
         cutoff  = today + datetime.timedelta(days=90)
         calls_oi = puts_oi = 0
 
-        dates = [d for d in stock.options
+        dates = [d for d in expiries
                  if today <= datetime.datetime.strptime(d, "%Y-%m-%d").date() <= cutoff]
 
         for d in dates:
