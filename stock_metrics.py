@@ -28,9 +28,7 @@ _SESSION.headers.update({
         "AppleWebKit/537.36 (KHTML, like Gecko) "
         "Chrome/120.0.0.0 Safari/537.36"
     ),
-    "Accept":          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.5",
-    "Accept-Encoding": "gzip, deflate, br",
 })
 
 # ── Constants ─────────────────────────────────────────────────────────────────
@@ -69,7 +67,7 @@ def _safe_float(value, decimals=2):
 
 def _download(symbol: str, period: str, interval: str = "1d") -> pd.DataFrame:
     df = yf.download(symbol, period=period, interval=interval,
-                     progress=False, auto_adjust=True, session=_SESSION)
+                     progress=False, auto_adjust=True)
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.get_level_values(0)
     return df
