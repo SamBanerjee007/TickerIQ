@@ -10,33 +10,13 @@ import datetime
 import numpy as np
 import pandas as pd
 import pandas_ta as ta
-import requests
 import yfinance as yf
 
 warnings.filterwarnings("ignore", category=RuntimeWarning)
 warnings.filterwarnings("ignore", category=FutureWarning)
 warnings.filterwarnings("ignore", message=".*utcnow.*")   # yfinance uses deprecated Timestamp.utcnow
-
-# ── Shared HTTP session ────────────────────────────────────────────────────────
-# Cloud platforms (Streamlit, AWS) are often rate-limited by Yahoo Finance.
-# Passing a session with a real browser User-Agent bypasses this reliably.
-
-_SESSION = requests.Session()
-_SESSION.headers.update({
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/120.0.0.0 Safari/537.36"
-    ),
-    "Accept":          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    "Accept-Language": "en-US,en;q=0.5",
-})
-# Prime the session with real Yahoo Finance cookies once at startup.
-# This is required on cloud platforms where .info is otherwise blocked.
-try:
-    _SESSION.get("https://finance.yahoo.com", timeout=8)
-except Exception:
-    pass
+# yfinance 0.2.50+ uses curl_cffi internally for browser impersonation.
+# Do NOT pass a custom requests.Session — it will be rejected.
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -177,7 +157,7 @@ def get_technical_indicators(symbol: str, period: str = "6mo") -> dict:
 
 def get_options_sentiment(symbol: str) -> dict:
     try:
-        stock = yf.Ticker(symbol, session=_SESSION)
+        stock = yf.Ticker(symbol)
         if not stock.options:
             return {"pc_ratio": None, "sentiment": "N/A", "calls_oi": 0, "puts_oi": 0}
 
@@ -243,7 +223,7 @@ def get_fundamentals(symbol: str) -> dict:
         "free_cashflow": None, "total_revenue": None,
     }
 
-    ticker = yf.Ticker(symbol, session=_SESSION)
+    ticker = yf.Ticker(symbol)
 
     # Tier 1 — fast_info (same endpoint as download, always works)
     try:
