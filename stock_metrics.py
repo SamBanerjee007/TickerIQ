@@ -201,12 +201,12 @@ def get_options_sentiment(symbol: str) -> dict:
 
 def get_fundamentals(symbol: str) -> dict:
     """
-    Two-tier fetch:
-      1. fast_info  — uses the same v8 chart endpoint as yf.download(), very
-                      reliable on cloud.  Covers price, mkt cap, 52w H/L.
-      2. .info      — richer data (sector, P/E, analyst ratings…) but can be
-                      blocked on cloud IPs.  Enriches the result when available;
-                      silently skipped when not.
+    Three-tier fetch — each tier is independent; failures are silenced.
+
+    Tier 0  yf.download(period="1y")  — same call that powers Technicals,
+            confirmed working everywhere.  Gives price, 52w H/L from raw OHLC.
+    Tier 1  fast_info                  — market cap, currency (needs curl_cffi).
+    Tier 2  .info                      — sector, P/E, analyst ratings, etc.
     """
     result = {
         "symbol": symbol, "name": symbol,
@@ -223,22 +223,37 @@ def get_fundamentals(symbol: str) -> dict:
         "free_cashflow": None, "total_revenue": None,
     }
 
-    ticker = yf.Ticker(symbol)
-
-    # Tier 1 — fast_info (same endpoint as download, always works)
+    # ── Tier 0: raw OHLC download — always works ─────────────────────────────
     try:
-        fi = ticker.fast_info
-        result["current_price"] = _safe_float(getattr(fi, "last_price",           None))
-        result["market_cap"]    = _safe_float(getattr(fi, "market_cap",           None))
-        result["52w_high"]      = _safe_float(getattr(fi, "fifty_two_week_high",  None))
-        result["52w_low"]       = _safe_float(getattr(fi, "fifty_two_week_low",   None))
-        result["currency"]      = getattr(fi, "currency", "USD") or "USD"
+        df1y = _download(symbol, period="1y")
+        if not df1y.empty:
+            if "Close" in df1y.columns:
+                result["current_price"] = _safe_float(df1y["Close"].iloc[-1])
+            if "High" in df1y.columns:
+                result["52w_high"] = _safe_float(df1y["High"].max())
+            if "Low" in df1y.columns:
+                result["52w_low"] = _safe_float(df1y["Low"].min())
     except Exception:
         pass
 
-    # Tier 2 — .info (richer, but can be blocked on cloud; fail gracefully)
+    # ── Tier 1: fast_info (needs curl_cffi; skip silently if unavailable) ────
     try:
-        info = ticker.info
+        fi = yf.Ticker(symbol).fast_info
+        result["market_cap"] = _safe_float(getattr(fi, "market_cap",          None))
+        result["currency"]   = getattr(fi, "currency", "USD") or "USD"
+        # Override price/52w from fast_info only if tier-0 missed them
+        if result["current_price"] is None:
+            result["current_price"] = _safe_float(getattr(fi, "last_price", None))
+        if result["52w_high"] is None:
+            result["52w_high"] = _safe_float(getattr(fi, "fifty_two_week_high", None))
+        if result["52w_low"] is None:
+            result["52w_low"] = _safe_float(getattr(fi, "fifty_two_week_low", None))
+    except Exception:
+        pass
+
+    # ── Tier 2: .info — rich fundamentals (needs curl_cffi on cloud) ─────────
+    try:
+        info = yf.Ticker(symbol).info
         if info and len(info) > 5:
             def sf(key, dec=2):
                 return _safe_float(info.get(key), dec)
