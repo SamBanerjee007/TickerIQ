@@ -9,6 +9,7 @@ Pages:
 
 import math
 import requests
+import pandas as pd
 import streamlit as st
 import plotly.graph_objects as go
 import plotly.express as px
@@ -219,6 +220,82 @@ def _gauge(score: float, signal: str, color: str) -> go.Figure:
     return fig
 
 
+# ── Entry / Exit signal levels ────────────────────────────────────────────
+
+def _calc_entry_exit(signal: str, sr_data: dict, tech: dict, fund: dict):
+    """
+    Derive entry and exit price levels purely from data already in memory.
+    Pivot points (S1/S2/R1/R2) + Bollinger Bands — zero extra API calls.
+    Bollinger Bands are period-specific (3mo/6mo/1y) so signals implicitly
+    vary by trading style. Pivot points are from prior-day OHLC (fixed).
+
+    Key invariant enforced here:
+      • Entry (buy signals)  → must be BELOW current price
+      • Exit  (buy signals)  → must be ABOVE current price
+      • Exit  (sell signals) → must be BELOW current price (stop / trim level)
+    """
+    pivots = sr_data.get("pivots", {})
+    s1     = pivots.get("S1")
+    s2     = pivots.get("S2")
+    r1     = pivots.get("R1")
+    r2     = pivots.get("R2")
+    pp     = pivots.get("PP")
+    bb_lo  = tech.get("bb_lower")
+    bb_hi  = tech.get("bb_upper")
+    price  = tech.get("current_price") or fund.get("current_price")
+    target = fund.get("target_mean_price")
+
+    def _best_below(*levels):
+        """Highest support level strictly below current price. Returns None if none qualify."""
+        candidates = [l for l in levels if l is not None]
+        if price:
+            under = [l for l in candidates if l < price]
+            return max(under) if under else None
+        return candidates[0] if candidates else None
+
+    def _best_above(*levels):
+        """Lowest resistance level strictly above current price. Returns None if none qualify."""
+        candidates = [l for l in levels if l is not None]
+        if price:
+            over = [l for l in candidates if l > price]
+            return min(over) if over else None
+        return candidates[0] if candidates else None
+
+    w52_hi = fund.get("52w_high")
+
+    if signal == "Strong Buy":
+        entry  = _best_below(s1, bb_lo, s2)
+        exit_  = _best_above(r2, target, r1, bb_hi, w52_hi)
+        e_note = "S1 support"
+        x_note = "R2 / analyst target" if target else "R2 resistance"
+
+    elif signal == "Buy":
+        entry  = _best_below(s1, bb_lo, s2)
+        exit_  = _best_above(r1, r2, target, bb_hi)
+        e_note = "S1 / BB lower"
+        x_note = "R1 resistance"
+
+    elif signal == "Hold":
+        entry  = _best_below(s2, s1, bb_lo)
+        exit_  = _best_above(r1, r2, target, bb_hi)
+        e_note = "S2 — wait for pullback"
+        x_note = "R1 / R2 resistance"
+
+    elif signal == "Sell":
+        entry  = None
+        exit_  = _best_below(s1, s2, bb_lo)
+        e_note = "avoid entry"
+        x_note = "S1 — reduce / exit"
+
+    else:  # Strong Sell
+        entry  = None
+        exit_  = _best_below(s2, s1, bb_lo)
+        e_note = "avoid entry"
+        x_note = "exit now"
+
+    return entry, exit_, e_note, x_note
+
+
 # ── Component score bar chart ─────────────────────────────────────────────────
 
 def _component_chart(component_scores: dict) -> go.Figure:
@@ -330,6 +407,41 @@ def _render_result(result: dict) -> None:
 
     with top_col1:
         st.plotly_chart(_gauge(score, signal, color), width="stretch")
+
+        entry_px, exit_px, e_note, x_note = _calc_entry_exit(signal, sr_data, tech, fund)
+
+        e_color = "#69F0AE" if signal in ("Strong Buy", "Buy") else \
+                  "#888888" if signal == "Hold" else "#FF6D00"
+        x_color = "#FF6D00" if signal in ("Sell", "Strong Sell") else \
+                  "#FFD600" if signal == "Hold" else "#69F0AE"
+
+        sig_c1, sig_c2 = st.columns(2)
+        for col, label, px_val, note, clr in (
+            (sig_c1, "Entry Signal", entry_px, e_note, e_color),
+            (sig_c2, "Exit Signal",  exit_px,  x_note, x_color),
+        ):
+            with col:
+                if px_val:
+                    st.markdown(
+                        f"<div style='text-align:center;margin:4px 0 0'>"
+                        f"<span style='color:#888;font-size:0.68rem'>{label}</span><br>"
+                        f"<span style='font-size:1.05rem;font-weight:700;color:{clr}'>${px_val:,.2f}</span><br>"
+                        f"<span style='color:#555;font-size:0.65rem'>{note}</span>"
+                        f"</div>",
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    # No level found: entry=N/A for sell signals, exit=N/A means
+                    # stock is above all near-term resistance (buy/hold breakout zone)
+                    no_price_note = note if signal in ("Sell", "Strong Sell") \
+                                    else "above near-term resistance"
+                    st.markdown(
+                        f"<div style='text-align:center;margin:4px 0 0'>"
+                        f"<span style='color:#888;font-size:0.68rem'>{label}</span><br>"
+                        f"<span style='font-size:0.85rem;color:#666'>{no_price_note}</span>"
+                        f"</div>",
+                        unsafe_allow_html=True,
+                    )
 
     with top_col2:
         st.markdown("#### Market Snapshot")
@@ -668,10 +780,17 @@ def show_admin_page():
     with st.expander("📋 Raw query log"):
         raw = stats.get("raw")
         if raw is not None:
+            display = raw[["created_at", "symbol", "trading_style", "score", "signal"]].copy()
+            try:
+                display["created_at"] = (
+                    pd.to_datetime(display["created_at"], utc=True)
+                      .dt.tz_convert("America/New_York")
+                      .dt.strftime("%Y-%m-%d %H:%M ET")
+                )
+            except Exception:
+                pass  # leave as-is if conversion fails
             st.dataframe(
-                raw[["created_at", "symbol", "trading_style", "score", "signal"]]
-                  .sort_values("created_at", ascending=False)
-                  .reset_index(drop=True),
+                display.sort_values("created_at", ascending=False).reset_index(drop=True),
                 width="stretch",
             )
 
