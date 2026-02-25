@@ -1,5 +1,6 @@
 # Secrets — NEVER commit these
 .streamlit/secrets.toml
+SupBase_dB_Pass.txt
 
 # Local SQLite database (query log, used when Supabase is not configured)
 tickeriq_local.db

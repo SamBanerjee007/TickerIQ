@@ -19,6 +19,17 @@ from support_resistance import get_sr_context
 from scoring            import calculate_score, _METRIC_LABELS
 from db                 import log_query, check_rate_limit, get_trending, get_admin_stats
 
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _cached_metrics(symbol: str, trading_style: str) -> dict:
+    """Cache Yahoo Finance results for 1 hour to avoid cloud IP rate-limiting."""
+    return get_all_metrics(symbol, trading_style)
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _cached_sr(symbol: str) -> dict:
+    return get_sr_context(symbol)
+
 # ── Page config ───────────────────────────────────────────────────────────────
 
 st.set_page_config(
@@ -662,8 +673,8 @@ def show_analysis_page():
 
         with st.spinner(f"Analyzing {symbol}…"):
             try:
-                metrics = get_all_metrics(symbol, trading_style)
-                sr_data = get_sr_context(symbol)
+                metrics = _cached_metrics(symbol, trading_style)
+                sr_data = _cached_sr(symbol)
                 scored  = calculate_score(metrics, sr_data)
 
                 log_query(symbol, trading_style,
