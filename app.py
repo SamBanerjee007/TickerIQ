@@ -1,10 +1,8 @@
 """
 TickerIQ — Intelligent Ticker Scoring
-Streamlit public web application.
+Private single-user deployment (Railway).
 
-Pages:
-  Main   — Enter ticker, pick trading style, get scored analysis + signal
-  Admin  — Password-protected usage dashboard (access via ?admin=1)
+Login-gated: credentials are read from st.secrets["auth"].
 """
 
 import math
@@ -17,7 +15,7 @@ import plotly.express as px
 from stock_metrics      import get_all_metrics, SECTOR_ETF_MAP
 from support_resistance import get_sr_context
 from scoring            import calculate_score, _METRIC_LABELS
-from db                 import log_query, check_rate_limit, get_trending, get_admin_stats
+from db                 import log_query, get_trending
 
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -88,10 +86,9 @@ st.markdown("""
 
 # ── Session state defaults ────────────────────────────────────────────────────
 
-if "results"             not in st.session_state: st.session_state.results = []
-if "captcha_verified"    not in st.session_state: st.session_state.captcha_verified = False
-if "session_query_count" not in st.session_state: st.session_state.session_query_count = 0
-if "admin_auth"          not in st.session_state: st.session_state.admin_auth = False
+if "results"          not in st.session_state: st.session_state.results = []
+if "captcha_verified" not in st.session_state: st.session_state.captcha_verified = False
+if "authenticated"    not in st.session_state: st.session_state.authenticated = False
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -588,6 +585,42 @@ def _render_result(result: dict) -> None:
     st.markdown('<hr class="divider">', unsafe_allow_html=True)
 
 
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Login gate
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+def _login_gate() -> bool:
+    """Return True when the session is authenticated; otherwise render the login
+    form and return False.  Credentials are read from st.secrets["auth"]."""
+    if st.session_state.authenticated:
+        return True
+
+    _, col, _ = st.columns([1, 1.2, 1])
+    with col:
+        st.markdown(
+            "<h2 style='text-align:center;color:#00D4AA;margin-bottom:0.2rem'>"
+            "TickerIQ</h2>"
+            "<p style='text-align:center;color:#888;font-size:0.85rem;"
+            "margin-bottom:1.8rem'>Private access</p>",
+            unsafe_allow_html=True,
+        )
+        username = st.text_input("Username", key="login_user")
+        password = st.text_input("Password", type="password", key="login_pass")
+        if st.button("Login", use_container_width=True):
+            try:
+                ok_user = st.secrets["auth"]["username"]
+                ok_pass = st.secrets["auth"]["password"]
+            except Exception:
+                st.error("Auth secrets not configured on this server.")
+                return False
+            if username == ok_user and password == ok_pass:
+                st.session_state.authenticated = True
+                st.rerun()
+            else:
+                st.error("Incorrect username or password.")
+    return False
+
+
 def show_analysis_page():
     st.markdown('<h1 class="main-header">TickerIQ</h1>', unsafe_allow_html=True)
     st.markdown(
@@ -661,16 +694,6 @@ def show_analysis_page():
                 st.info("Please complete the security check above and click Analyze again.")
                 return
 
-        # Session rate limit
-        if st.session_state.session_query_count >= 50:
-            st.error("Session limit reached. Please refresh the page to continue.")
-            return
-
-        # IP rate limit
-        if not check_rate_limit(max_per_hour=20):
-            st.error("Rate limit exceeded (20 analyses/hour). Please wait before trying again.")
-            return
-
         with st.spinner(f"Analyzing {symbol}…"):
             try:
                 metrics = _cached_metrics(symbol, trading_style)
@@ -679,7 +702,6 @@ def show_analysis_page():
 
                 log_query(symbol, trading_style,
                           scored["total_score"], scored["signal"])
-                st.session_state.session_query_count += 1
 
                 st.session_state.results = [{
                     "metrics": metrics,
@@ -706,118 +728,8 @@ def show_analysis_page():
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# Admin Page
+# Entry point
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-def show_admin_page():
-    st.header("🔐 Admin Dashboard")
-
-    if not st.session_state.admin_auth:
-        pwd = st.text_input("Password", type="password", key="admin_pwd")
-        if st.button("Login"):
-            try:
-                correct = st.secrets["admin"]["password"]
-            except Exception:
-                correct = ""
-            if pwd == correct:
-                st.session_state.admin_auth = True
-                st.rerun()
-            else:
-                st.error("Incorrect password.")
-        return
-
-    stats = get_admin_stats()
-    if not stats:
-        st.warning("No data available or database connection failed.")
-        return
-
-    # ── KPI row ───────────────────────────────────────────────────────────────
-    k1, k2, k3, k4 = st.columns(4)
-    k1.metric("All-time Queries", f"{stats['total']:,}")
-    k2.metric("Today",            f"{stats['today']:,}")
-    k3.metric("This Week",        f"{stats['this_week']:,}")
-    k4.metric("This Month",       f"{stats['this_month']:,}")
-
-    st.divider()
-
-    # ── Charts ────────────────────────────────────────────────────────────────
-    ch1, ch2 = st.columns(2)
-
-    with ch1:
-        st.subheader("Daily Query Volume")
-        dv = stats.get("daily_volume")
-        if dv is not None and not dv.empty:
-            fig = px.bar(dv, x="date", y="queries",
-                         color_discrete_sequence=["#00D4AA"])
-            fig.update_layout(paper_bgcolor="#0E1117", plot_bgcolor="#0E1117",
-                              font={"color": "#FAFAFA"}, margin=dict(l=0, r=0, t=0, b=0))
-            st.plotly_chart(fig, width="stretch")
-
-    with ch2:
-        st.subheader("Signal Distribution")
-        bs = stats.get("by_signal")
-        if bs is not None and not bs.empty:
-            fig = px.pie(bs, names=bs.columns[0], values=bs.columns[1],
-                         color_discrete_sequence=px.colors.sequential.Teal)
-            fig.update_layout(paper_bgcolor="#0E1117", font={"color": "#FAFAFA"},
-                              margin=dict(l=0, r=0, t=0, b=0))
-            st.plotly_chart(fig, width="stretch")
-
-    ch3, ch4 = st.columns(2)
-
-    with ch3:
-        st.subheader("Top Queried Symbols")
-        ts = stats.get("top_symbols")
-        if ts is not None and not ts.empty:
-            fig = px.bar(ts.head(15), x=ts.columns[1], y=ts.columns[0],
-                         orientation="h", color_discrete_sequence=["#69F0AE"])
-            fig.update_layout(yaxis={"autorange": "reversed"},
-                              paper_bgcolor="#0E1117", plot_bgcolor="#0E1117",
-                              font={"color": "#FAFAFA"}, margin=dict(l=0, r=0, t=0, b=0))
-            st.plotly_chart(fig, width="stretch")
-
-    with ch4:
-        st.subheader("Queries by Trading Style")
-        by = stats.get("by_style")
-        if by is not None and not by.empty:
-            fig = px.pie(by, names=by.columns[0], values=by.columns[1],
-                         color_discrete_sequence=px.colors.sequential.Teal_r)
-            fig.update_layout(paper_bgcolor="#0E1117", font={"color": "#FAFAFA"},
-                              margin=dict(l=0, r=0, t=0, b=0))
-            st.plotly_chart(fig, width="stretch")
-
-    # ── Raw data ──────────────────────────────────────────────────────────────
-    st.divider()
-    with st.expander("📋 Raw query log"):
-        raw = stats.get("raw")
-        if raw is not None and not raw.empty:
-            display = raw[["created_at", "symbol", "trading_style", "score", "signal"]].copy()
-            try:
-                # _build_stats already ensures created_at is datetime64[ns, UTC];
-                # calling pd.to_datetime(..., utc=True) on an already-tz-aware column
-                # raises TypeError in pandas 2.2+ — go straight to tz_convert.
-                display["created_at"] = (
-                    display["created_at"]
-                      .dt.tz_convert("America/New_York")
-                      .dt.strftime("%Y-%m-%d %H:%M ET")
-                )
-            except Exception:
-                pass  # leave as-is if conversion fails
-            st.dataframe(
-                display.sort_values("created_at", ascending=False).reset_index(drop=True),
-                use_container_width=True,
-            )
-
-    if st.button("Logout"):
-        st.session_state.admin_auth = False
-        st.rerun()
-
-
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# Router — URL-param based, no sidebar
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-if st.query_params.get("admin") == "1":
-    show_admin_page()
-else:
+if _login_gate():
     show_analysis_page()
