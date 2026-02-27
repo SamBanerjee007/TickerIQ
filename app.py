@@ -790,11 +790,14 @@ def show_admin_page():
     st.divider()
     with st.expander("📋 Raw query log"):
         raw = stats.get("raw")
-        if raw is not None:
+        if raw is not None and not raw.empty:
             display = raw[["created_at", "symbol", "trading_style", "score", "signal"]].copy()
             try:
+                # _build_stats already ensures created_at is datetime64[ns, UTC];
+                # calling pd.to_datetime(..., utc=True) on an already-tz-aware column
+                # raises TypeError in pandas 2.2+ — go straight to tz_convert.
                 display["created_at"] = (
-                    pd.to_datetime(display["created_at"], utc=True)
+                    display["created_at"]
                       .dt.tz_convert("America/New_York")
                       .dt.strftime("%Y-%m-%d %H:%M ET")
                 )
@@ -802,7 +805,7 @@ def show_admin_page():
                 pass  # leave as-is if conversion fails
             st.dataframe(
                 display.sort_values("created_at", ascending=False).reset_index(drop=True),
-                width="stretch",
+                use_container_width=True,
             )
 
     if st.button("Logout"):
