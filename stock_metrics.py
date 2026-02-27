@@ -229,6 +229,7 @@ def get_fundamentals(symbol: str) -> dict:
         "target_low_price": None,
         "52w_high": None, "52w_low": None, "beta": None,
         "free_cashflow": None, "total_revenue": None,
+        "next_earnings_date": None,
     }
 
     # ── Tier 0: raw OHLC download — always works ─────────────────────────────
@@ -294,7 +295,12 @@ def get_fundamentals(symbol: str) -> dict:
             result["debt_to_equity"]       = sf("debtToEquity")
             result["eps_growth_qoq"]       = sf("earningsQuarterlyGrowth", 4)
             result["revenue_growth_yoy"]   = sf("revenueGrowth", 4)
-            result["dividend_yield"]       = sf("dividendYield", 4)
+            # yfinance inconsistently returns dividendYield as a ratio (0.067)
+            # or as a percentage (6.7) depending on version/ticker — normalise to ratio.
+            dy = sf("dividendYield", 4)
+            if dy is not None and dy > 1.0:
+                dy = round(dy / 100, 4)
+            result["dividend_yield"]       = dy
             result["short_float"]          = sf("shortPercentOfFloat", 4)
             result["analyst_rating"]       = info.get("recommendationKey", "N/A")
             result["num_analyst_opinions"] = info.get("numberOfAnalystOpinions")
@@ -306,6 +312,18 @@ def get_fundamentals(symbol: str) -> dict:
             result["beta"]                 = sf("beta") or result["beta"]
             result["free_cashflow"]        = info.get("freeCashflow")
             result["total_revenue"]        = info.get("totalRevenue")
+            # Earnings date — prefer the window-start timestamp; fall back to
+            # earningsTimestamp.  Value is a Unix epoch int (seconds).
+            try:
+                et = info.get("earningsTimestampStart") or info.get("earningsTimestamp")
+                if isinstance(et, list):
+                    et = et[0] if et else None
+                if et and isinstance(et, (int, float)) and et > 0:
+                    result["next_earnings_date"] = (
+                        datetime.datetime.utcfromtimestamp(et).date()
+                    )
+            except Exception:
+                pass
     except Exception as e:
         print(f"[TickerIQ] .info {symbol}: {type(e).__name__}: {e}")
 

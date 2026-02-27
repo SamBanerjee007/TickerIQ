@@ -6,6 +6,7 @@ Login-gated: credentials are read from st.secrets["auth"].
 """
 
 import math
+import datetime
 import requests
 import pandas as pd
 import streamlit as st
@@ -454,12 +455,25 @@ def _render_result(result: dict) -> None:
     with top_col2:
         st.markdown("#### Market Snapshot")
         mc = _fmt_large(fund.get("market_cap"))
-        st.markdown(f"| | |\n|---|---|\n"
-                    f"| **Price**    | ${_fmt(current)} |\n"
-                    f"| **Mkt Cap**  | {mc} |\n"
-                    f"| **52w High** | ${_fmt(fund.get('52w_high'))} |\n"
-                    f"| **52w Low**  | ${_fmt(fund.get('52w_low'))} |\n"
-                    f"| **Beta**     | {_fmt(fund.get('beta'))} |")
+        snap_rows = [
+            f"| **Price**    | ${_fmt(current)} |",
+            f"| **Mkt Cap**  | {mc} |",
+            f"| **52w High** | ${_fmt(fund.get('52w_high'))} |",
+            f"| **52w Low**  | ${_fmt(fund.get('52w_low'))} |",
+            f"| **Beta**     | {_fmt(fund.get('beta'))} |",
+        ]
+        dy = fund.get("dividend_yield")
+        if dy:
+            snap_rows.append(f"| **Div Yield** | {_pct(dy)} |")
+        er_date = fund.get("next_earnings_date")
+        if er_date:
+            days_away = (er_date - datetime.date.today()).days
+            if 0 <= days_away <= 14:
+                urgency = "⚠️ " if days_away <= 7 else ""
+                snap_rows.append(
+                    f"| **{urgency}Next ER** | {er_date.strftime('%b %d')} ({days_away}d) |"
+                )
+        st.markdown("| | |\n|---|---|\n" + "\n".join(snap_rows))
 
     with top_col3:
         st.markdown(f"#### vs Market *(last {period_label})*")
