@@ -20,6 +20,14 @@ jobs:
             https://tickeriq.streamlit.app/)
           echo "Streamlit master status: $STATUS"
 
+      - name: Ping Railway app (personal / private)
+        run: |
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            --max-time 30 \
+            -A "Mozilla/5.0 (keepalive bot)" \
+            https://tickeriq-production.up.railway.app/)
+          echo "Railway personal status: $STATUS"
+
       - name: Query Supabase — keep project active
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
