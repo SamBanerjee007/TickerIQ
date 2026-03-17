@@ -1,0 +1,33 @@
+name: Keep Alive
+
+# Runs every 3 days to prevent Supabase from pausing the project
+# and to keep the Streamlit app from going to sleep.
+on:
+  schedule:
+    - cron: "0 10 */3 * *"   # 10:00 UTC every 3 days
+  workflow_dispatch:           # allow manual trigger from GitHub Actions UI
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+
+      - name: Ping Streamlit app (master / public)
+        run: |
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            --max-time 30 \
+            -A "Mozilla/5.0 (keepalive bot)" \
+            https://tickeriq.streamlit.app/)
+          echo "Streamlit master status: $STATUS"
+
+      - name: Query Supabase — keep project active
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: |
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            --max-time 30 \
+            "$SUPABASE_URL/rest/v1/queries?select=id&limit=1" \
+            -H "apikey: $SUPABASE_ANON_KEY" \
+            -H "Authorization: Bearer $SUPABASE_ANON_KEY")
+          echo "Supabase ping status: $STATUS"
