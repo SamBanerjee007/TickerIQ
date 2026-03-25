@@ -20,15 +20,6 @@ jobs:
             https://tickeriq.streamlit.app/)
           echo "Streamlit master status: $STATUS"
 
-      - name: Ping Render app (personal / private)
-        env:
-          RENDER_PERSONAL_URL: ${{ secrets.RENDER_PERSONAL_URL }}
-        run: |
-          STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-            --max-time 30 \
-            -A "Mozilla/5.0 (keepalive bot)" \
-            "$RENDER_PERSONAL_URL")
-          echo "Render personal status: $STATUS"
 
       - name: Query Supabase — keep project active
         env:
