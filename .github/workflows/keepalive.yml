@@ -4,7 +4,7 @@ name: Keep Alive
 # and to keep the Streamlit app from going to sleep.
 on:
   schedule:
-    - cron: "0 10 */3 * *"   # 10:00 UTC every 3 days
+    - cron: "0 10 */2 * *"   # 10:00 UTC every 2 days
   workflow_dispatch:           # allow manual trigger from GitHub Actions UI
 
 jobs:
@@ -32,3 +32,7 @@ jobs:
             -H "apikey: $SUPABASE_ANON_KEY" \
             -H "Authorization: Bearer $SUPABASE_ANON_KEY")
           echo "Supabase ping status: $STATUS"
+          if [ "$STATUS" != "200" ]; then
+            echo "ERROR: Supabase ping returned $STATUS — project may still go inactive!"
+            exit 1
+          fi
